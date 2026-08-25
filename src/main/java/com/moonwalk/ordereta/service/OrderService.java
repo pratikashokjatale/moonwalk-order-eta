@@ -95,6 +95,37 @@ public class OrderService {
         return savedOrder;
     }
 
+    @Transactional
+    public Order updateOrder(Order order) {
+        Restaurant restaurant = restaurantService.getRestaurant(order.getRestaurantId());
+        KitchenState state = kitchenService.getCurrentState(restaurant.getId());
+
+        // Recalculate ETA based on new items
+        EtaResult etaResult = etaEngine.calculate(restaurant.getStrategy(), order, state);
+
+        order.setEstimatedTimeSeconds(etaResult.getEstimatedTimeSeconds());
+        order.setEstimatedAt(LocalDateTime.now());
+        
+        Order savedOrder = orderRepository.save(order);
+
+        // Save ETA execution history for this update
+        EtaExecution execution = EtaExecution.builder()
+                .orderId(savedOrder.getId())
+                .estimatedTimeSeconds(etaResult.getEstimatedTimeSeconds())
+                .algorithmUsed(restaurant.getStrategy())
+                .pendingOrderCount(state.getPendingOrders().size())
+                .availableChefCount(state.getAvailableChefs().size())
+                .busyStationCount((int) state.getAllStations().stream().filter(s -> s.getStatus() == StationStatus.BUSY).count())
+                .status("UPDATED")
+                .build();
+        etaExecutionRepository.save(execution);
+
+        // Note: For a fully accurate system, we would subtract the old workload from the chefs/stations before adding the new workload here. 
+        // For simplicity in this demo, we assume updating an order recalculates ETA but doesn't fundamentally change the global workload assignment tracking.
+
+        return savedOrder;
+    }
+
     public Order getOrder(Long id) {
         return orderRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found with id " + id));

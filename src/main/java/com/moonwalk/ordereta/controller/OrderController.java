@@ -85,6 +85,43 @@ public class OrderController {
         return orderService.updateOrderStatus(orderId, status);
     }
 
+    @PutMapping("/orders/{orderId}")
+    public OrderResponse updateOrder(@PathVariable Long orderId, @RequestBody CreateOrderRequest request) {
+        Order existingOrder = orderService.getOrder(orderId);
+        
+        // Clear existing items
+        existingOrder.getItems().clear();
+        
+        var allDishes = dishService.getDishesByRestaurant(existingOrder.getRestaurantId());
+
+        for (OrderItemRequest itemReq : request.getItems()) {
+            Dish dish = allDishes.stream()
+                .filter(d -> d.getId().equals(itemReq.getDishId()))
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("Dish not found: " + itemReq.getDishId()));
+            
+            OrderItem item = OrderItem.builder()
+                    .dishId(dish.getId())
+                    .quantity(itemReq.getQuantity())
+                    .preparationTime(dish.getPreparationTime())
+                    .build();
+            existingOrder.addItem(item);
+        }
+
+        // Recalculate ETA and save using the service
+        Order updatedOrder = orderService.updateOrder(existingOrder);
+        
+        long estimatedTimeMinutes = updatedOrder.getEstimatedTimeSeconds() != null ? updatedOrder.getEstimatedTimeSeconds() / 60 : 0;
+        
+        return OrderResponse.builder()
+                .orderId(updatedOrder.getId())
+                .status(updatedOrder.getStatus().name())
+                .estimatedTimeMinutes(estimatedTimeMinutes)
+                .remainingSeconds(updatedOrder.getEstimatedTimeSeconds())
+                .algorithm(updatedOrder.getAlgorithmUsed().name())
+                .build();
+    }
+
     @GetMapping("/orders/{orderId}/eta-history")
     public List<EtaExecution> getEtaHistory(@PathVariable Long orderId) {
         return orderService.getEtaHistory(orderId);
